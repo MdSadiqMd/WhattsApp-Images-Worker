@@ -4,3 +4,10 @@ compatibility_date = "2024-04-15"
 
 [build]
 command = "make build"
+
+[vars]
+MAYTAPI_API_TOKEN="258ff5f3-35de-4be7-a4c4-c825749b09da"
+GROUP_ID="H7dmHZEVhiy89oSgFlCrAP"
+MAYTAPI_PRODUCT_ID="4a5487e5-7657-49da-b52a-a307af4ac3e9"
+MAYTAPI_WEBHOOK_TOKEN="258ff5f3-35de-4be7-a4c4-c825749b09da"
+PHONE_ID="61951"
