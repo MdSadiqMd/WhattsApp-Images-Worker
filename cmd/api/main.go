@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/go-chi/chi"
+	"github.com/syumai/workers"
 )
 
 type Config struct {
@@ -35,28 +38,13 @@ type Message struct {
 
 type Client struct {
 	config            Config
-	httpClient        *http.Client
 	lastProcessedTime int64
 }
 
 func NewClient(config Config) *Client {
 	return &Client{
-		config: config,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		config:            config,
 		lastProcessedTime: time.Now().Add(-time.Duration(config.Minutes) * time.Minute).Unix(),
-	}
-}
-
-func (c *Client) Start() {
-	log.Printf("Starting client with %v interval, monitoring last %d minutes\n",
-		c.config.Interval, c.config.Minutes)
-	for {
-		if err := c.fetchMessages(); err != nil {
-			log.Printf("Error fetching messages: %v\n", err)
-		}
-		time.Sleep(c.config.Interval)
 	}
 }
 
@@ -67,22 +55,25 @@ func (c *Client) fetchMessages() error {
 		return fmt.Errorf("error marshaling payload: %w", err)
 	}
 
-	req, err := http.NewRequest("GET", c.config.BaseURL, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequest("POST", c.config.BaseURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(req)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("error making request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("error reading response: %w", err)
 	}
+
+	/* log.Printf("Response Body: %s\n", body) // Log the response body */
 
 	var messages []Message
 	if err := json.Unmarshal(body, &messages); err != nil {
@@ -92,6 +83,8 @@ func (c *Client) fetchMessages() error {
 	filteredMessages := c.filterMessages(messages)
 	if len(filteredMessages) > 0 {
 		c.processMessages(filteredMessages)
+	} else {
+		log.Println("No new messages found.")
 	}
 
 	return nil
@@ -107,17 +100,12 @@ func (c *Client) filterMessages(messages []Message) []Message {
 			msg.Timestamp >= cutoffTime &&
 			msg.Timestamp > c.lastProcessedTime {
 			filtered = append(filtered, msg)
+			log.Printf("Filtered message: %+v\n", msg)
 		}
 	}
 
 	if len(filtered) > 0 {
-		latestTimestamp := filtered[0].Timestamp
-		for _, msg := range filtered[1:] {
-			if msg.Timestamp > latestTimestamp {
-				latestTimestamp = msg.Timestamp
-			}
-		}
-		c.lastProcessedTime = latestTimestamp
+		c.lastProcessedTime = filtered[len(filtered)-1].Timestamp
 	}
 
 	return filtered
@@ -137,6 +125,17 @@ func (c *Client) processMessages(messages []Message) {
 	}
 }
 
+func (client *Client) startFetching() {
+	ticker := time.NewTicker(client.config.Interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if err := client.fetchMessages(); err != nil {
+			log.Printf("Error fetching messages: %v\n", err)
+		}
+	}
+}
+
 func main() {
 	config := Config{
 		BaseURL:  "https://7105.api.greenapi.com/waInstance7105171289/lastOutgoingMessages/5c093cb8c7494f8fa75e8606e9447e01cca52bf3d6e34da9bc",
@@ -145,5 +144,12 @@ func main() {
 	}
 
 	client := NewClient(config)
-	client.Start()
+
+	go client.startFetching()
+	r := chi.NewRouter()
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Fetching messages in the background..."))
+	})
+
+	workers.Serve(r)
 }
