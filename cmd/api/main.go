@@ -6,9 +6,18 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"time"
 )
 
 func main() {
+	interval := 5 * time.Second
+	for {
+		makeRequest()
+		time.Sleep(interval)
+	}
+}
+
+func makeRequest() {
 	url := "https://7105.api.greenapi.com/waInstance7105171289/lastOutgoingMessages/5c093cb8c7494f8fa75e8606e9447e01cca52bf3d6e34da9bc"
 
 	payload := map[string]int{"minutes": 5}
@@ -17,6 +26,7 @@ func main() {
 		fmt.Println("Error marshaling JSON:", err)
 		return
 	}
+
 	req, err := http.NewRequest("GET", url, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		fmt.Println("Error creating request:", err)
@@ -37,5 +47,5 @@ func main() {
 		return
 	}
 
-	fmt.Println(string(body))
+	fmt.Println("Response:", string(body))
 }
