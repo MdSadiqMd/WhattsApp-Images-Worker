@@ -7,17 +7,14 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"syscall/js"
 	"time"
-
-	"github.com/go-chi/chi"
-	"github.com/syumai/workers"
 )
 
 type Config struct {
-	BaseURL  string
-	Token    string
-	Interval time.Duration
-	Minutes  int
+	BaseURL string
+	Token   string
+	Minutes int
 }
 
 type Message struct {
@@ -48,46 +45,50 @@ func NewClient(config Config) *Client {
 	}
 }
 
-func (c *Client) fetchMessages() error {
+func (c *Client) handleRequest(this js.Value, args []js.Value) interface{} {
 	payload := map[string]int{"minutes": c.config.Minutes}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("error marshaling payload: %w", err)
+		log.Printf("Error marshaling payload: %v", err)
+		return nil
 	}
 
 	req, err := http.NewRequest("POST", c.config.BaseURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
-		return fmt.Errorf("error creating request: %w", err)
+		log.Printf("Error creating request: %v", err)
+		return nil
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("error making request: %w", err)
+		log.Printf("Error making request: %v", err)
+		return nil
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("error reading response: %w", err)
+		log.Printf("Error reading response: %v", err)
+		return nil
 	}
-
-	/* log.Printf("Response Body: %s\n", body) // Log the response body */
 
 	var messages []Message
 	if err := json.Unmarshal(body, &messages); err != nil {
-		return fmt.Errorf("error unmarshaling response: %w", err)
+		log.Printf("Error unmarshaling response: %v", err)
+		return nil
 	}
 
 	filteredMessages := c.filterMessages(messages)
-	if len(filteredMessages) > 0 {
-		c.processMessages(filteredMessages)
-	} else {
-		log.Println("No new messages found.")
-	}
+	c.processMessages(filteredMessages)
 
-	return nil
+	result, _ := json.Marshal(filteredMessages)
+	return string(result)
 }
 
 func (c *Client) filterMessages(messages []Message) []Message {
@@ -121,35 +122,21 @@ func (c *Client) processMessages(messages []Message) {
 			log.Printf("Error marshaling message to JSON: %v\n", err)
 			continue
 		}
-		log.Printf("Filtered message data:\n%s\n", string(jsonData))
-	}
-}
-
-func (client *Client) startFetching() {
-	ticker := time.NewTicker(client.config.Interval)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		if err := client.fetchMessages(); err != nil {
-			log.Printf("Error fetching messages: %v\n", err)
-		}
+		log.Printf("Image message details:\n%s\n", string(jsonData))
 	}
 }
 
 func main() {
 	config := Config{
-		BaseURL:  "https://7105.api.greenapi.com/waInstance7105171289/lastOutgoingMessages/5c093cb8c7494f8fa75e8606e9447e01cca52bf3d6e34da9bc",
-		Interval: 5 * time.Second,
-		Minutes:  2,
+		BaseURL: "https://7105.api.greenapi.com/waInstance7105171289/lastOutgoingMessages/5c093cb8c7494f8fa75e8606e9447e01cca52bf3d6e34da9bc",
+		Minutes: 2,
 	}
 
 	client := NewClient(config)
+	requestHandler := js.FuncOf(client.handleRequest)
+	defer requestHandler.Release()
+	fmt.Println("Hello", requestHandler)
+	js.Global().Set("handleRequest", requestHandler)
 
-	go client.startFetching()
-	r := chi.NewRouter()
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Fetching messages in the background..."))
-	})
-
-	workers.Serve(r)
+	select {}
 }
