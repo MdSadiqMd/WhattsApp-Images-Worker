@@ -7,9 +7,11 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi"
+	"github.com/joho/godotenv"
 	"github.com/syumai/workers"
 )
 
@@ -92,9 +94,14 @@ func (c *Client) fetchMessages() error {
 func (c *Client) filterMessages(messages []Message) []Message {
 	var filtered []Message
 	cutoffTime := time.Now().Add(-time.Duration(c.config.Minutes) * time.Minute).Unix()
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+	CHAT_ID := os.Getenv("CHAT_ID")
 
 	for _, msg := range messages {
-		if msg.ChatID == "917416414823@c.us" &&
+		if msg.ChatID == CHAT_ID &&
 			msg.TypeMessage == "imageMessage" &&
 			msg.Timestamp >= cutoffTime &&
 			msg.Timestamp > c.lastProcessedTime {
